@@ -1,0 +1,415 @@
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
+import { ArrowLeft, Download, Pencil, Trash2 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import { getBill, deleteBill } from '../utils/storage';
+import type { Bill } from '../types';
+
+// ── Color palette — text only is black, no dark backgrounds ──
+const C_BLACK  = [0,   0,   0  ] as const; // text
+const C_MID    = [100, 100, 100] as const; // labels / captions
+const C_BORDER = [180, 180, 180] as const; // all borders
+const C_HEAD   = [230, 230, 230] as const; // table header row bg
+const C_ALT    = [246, 246, 246] as const; // alternating row bg
+const C_BAND   = [238, 238, 238] as const; // amount-in-words / footer band bg
+const C_WHITE  = [255, 255, 255] as const;
+
+// ── Amount in words (Indian numbering) ───────────────────────
+const ONES = ['', 'One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
+  'Ten','Eleven','Twelve','Thirteen','Fourteen','Fifteen','Sixteen','Seventeen',
+  'Eighteen','Nineteen'];
+const TENS = ['','','Twenty','Thirty','Forty','Fifty','Sixty','Seventy','Eighty','Ninety'];
+
+function belowHundred(n: number): string {
+  if (n < 20) return ONES[n];
+  return TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + ONES[n % 10] : '');
+}
+
+function belowThousand(n: number): string {
+  if (n < 100) return belowHundred(n);
+  return ONES[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + belowHundred(n % 100) : '');
+}
+
+function amountInWords(amount: number): string {
+  const rupees = Math.floor(amount);
+  const paise  = Math.round((amount - rupees) * 100);
+
+  if (rupees === 0 && paise === 0) return 'Zero Rupees Only';
+
+  const parts: string[] = [];
+  let n = rupees;
+
+  if (n >= 10_000_000) {
+    parts.push(belowThousand(Math.floor(n / 10_000_000)) + ' Crore');
+    n %= 10_000_000;
+  }
+  if (n >= 100_000) {
+    parts.push(belowThousand(Math.floor(n / 100_000)) + ' Lakh');
+    n %= 100_000;
+  }
+  if (n >= 1_000) {
+    parts.push(belowThousand(Math.floor(n / 1_000)) + ' Thousand');
+    n %= 1_000;
+  }
+  if (n > 0) parts.push(belowThousand(n));
+
+  let result = parts.join(' ') + ' Rupees';
+  if (paise > 0) result += ' and ' + belowHundred(paise) + ' Paise';
+  return result + ' Only';
+}
+
+// ── PDF builder ───────────────────────────────────────────────
+function buildPDF(bill: Bill): jsPDF {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const W = doc.internal.pageSize.getWidth();
+  const M = 12;
+  const cW = W - M * 2;
+
+  const fmtDate = bill.date
+    ? new Date(bill.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+
+  const grandTotal = bill.items.reduce((s, it) => s + it.qty * it.pcs * it.rate, 0);
+
+  // ── ESTIMATE header — white bg, black bold text, gray bottom border ──
+  doc.setFillColor(...C_WHITE);
+  doc.rect(M, 8, cW, 13, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(...C_BLACK);
+  doc.text('ESTIMATE', W / 2, 17, { align: 'center' });
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.4);
+  doc.line(M, 21, W - M, 21);
+
+  // ── Meta row — name left, challan no right, same line ────────
+  let y = 28;
+  const P = 8; // inner horizontal padding from outer border
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...C_MID);
+  doc.text('M/s :', M + P, y);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...C_BLACK);
+  doc.text(bill.customerName.toUpperCase(), M + P + 11, y);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...C_MID);
+  doc.text('Challan No :', W / 2 + 10, y);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...C_BLACK);
+  doc.text(bill.challanNo, W - M - P, y, { align: 'right' });
+
+  // ── Second meta row — location left, date right ───────────────
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(...C_MID);
+  doc.text('Location :', M + P, y);
+  doc.setTextColor(...C_BLACK);
+  doc.text(bill.location || '—', M + P + 18, y);
+
+  doc.setTextColor(...C_MID);
+  doc.text('Date :', W / 2 + 10, y);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(...C_BLACK);
+  doc.text(fmtDate, W - M - P, y, { align: 'right' });
+
+  // Divider
+  y += 5;
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.3);
+  doc.line(M, y, W - M, y);
+  y += 3;
+
+  // ── Items table ───────────────────────────────────────────────
+  const rows = bill.items.map((it, i) => [
+    String(i + 1),
+    it.productName,
+    `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
+    String(it.pcs),
+    it.rate.toLocaleString('en-IN'),
+    (it.qty * it.pcs * it.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+  ]);
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: M + P, right: M + P },
+    head: [['Sr', 'Product Name', 'Qty / Unit', 'Pcs', 'Rate', 'Total']],
+    body: rows,
+    foot: [['', '', '', '', 'Grand Total', grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })]],
+    headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center' },
+    footStyles: { fillColor: C_BAND, textColor: C_BLACK, fontStyle: 'bold', fontSize: 9, halign: 'right' },
+    bodyStyles: { fontSize: 8, textColor: C_BLACK },
+    alternateRowStyles: { fillColor: C_ALT },
+    columnStyles: {
+      0: { halign: 'center', cellWidth: 10 },
+      1: { halign: 'left' },
+      2: { halign: 'right', cellWidth: 32 },
+      3: { halign: 'center', cellWidth: 14 },
+      4: { halign: 'right', cellWidth: 22 },
+      5: { halign: 'right', cellWidth: 28, fontStyle: 'bold' },
+    },
+    styles: { lineColor: C_BORDER, lineWidth: 0.2 },
+    didParseCell: (data) => {
+      if (data.section === 'foot' && data.column.index < 4) {
+        data.cell.styles.fillColor = C_ALT as unknown as [number, number, number];
+        data.cell.styles.textColor = C_MID as unknown as [number, number, number];
+      }
+    },
+  });
+
+  const blockTop = (doc as any).lastAutoTable.finalY + 4;
+
+  // Left column: Amount in Words, Narration, Note (small gaps, no dividers)
+  // Right column: Receiver's Signature
+  const leftW = cW * 0.62;
+  const rightX = M + leftW + 2;
+  const rightW = cW - leftW - 2;
+  const lineGap = 5.5; // gap between rows
+
+  const infoRows: { label: string; value: string; italic?: boolean }[] = [
+    { label: 'Amount in Words :', value: amountInWords(grandTotal), italic: true },
+    { label: 'Narration :', value: bill.narration || 'OK' },
+    ...(bill.note ? [{ label: 'Note :', value: bill.note }] : []),
+  ];
+
+  // Calculate block height from content
+  const blockH = Math.max(infoRows.length * lineGap + 8, 22);
+
+  // ── Outer block (white bg, gray border) ──────────────────────
+  doc.setFillColor(...C_WHITE);
+  doc.rect(M, blockTop, cW, blockH, 'F');
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.3);
+  doc.rect(M, blockTop, cW, blockH, 'S');
+
+  // ── Left: info rows ───────────────────────────────────────────
+  doc.setFontSize(8);
+  let ly = blockTop + 6;
+  infoRows.forEach((row) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...C_MID);
+    doc.text(row.label, M + P, ly);
+    doc.setFont('helvetica', row.italic ? 'bolditalic' : 'normal');
+    doc.setTextColor(...C_BLACK);
+    const labelW = doc.getTextWidth(row.label) + 3;
+    doc.text(row.value, M + P + labelW, ly, { maxWidth: leftW - labelW - P - 2 });
+    ly += lineGap;
+  });
+
+  // ── Right: Receiver's Signature centred vertically ────────────
+  const sigMidY = blockTop + blockH / 2;
+  const sigLineY = sigMidY + 2;
+  doc.setDrawColor(...C_MID);
+  doc.setLineWidth(0.3);
+  doc.line(rightX + 4, sigLineY, rightX + rightW - 4, sigLineY);
+  doc.setFontSize(7.5);
+  doc.setTextColor(...C_MID);
+  doc.text("Receiver's Signature", rightX + rightW / 2, sigLineY + 4, { align: 'center' });
+
+  // ── Outer border — wraps only actual content ──────────────────
+  const contentBottom = blockTop + blockH + 2;
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.5);
+  doc.rect(M, 8, cW, contentBottom - 8, 'S');
+
+  return doc;
+}
+
+export default function BillView() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const printRef = useRef<HTMLDivElement>(null);
+  const [bill, setBill] = useState<Bill | null>(null);
+  const [showDelete, setShowDelete] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    if (id) {
+      const b = getBill(id);
+      if (b) setBill(b);
+      else navigate('/');
+    }
+  }, [id, navigate]);
+
+  function handleDownloadPDF() {
+    if (!bill) return;
+    setDownloading(true);
+    try {
+      const doc = buildPDF(bill);
+      doc.save(`Challan_${bill.challanNo.replace(/\//g, '-')}.pdf`);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  function handleDelete() {
+    if (id) {
+      deleteBill(id);
+      navigate('/');
+    }
+  }
+
+  if (!bill) return null;
+
+  const formattedDate = bill.date
+    ? new Date(bill.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : '';
+
+  const grandTotal = bill.items.reduce((s, it) => s + it.qty * it.pcs * it.rate, 0);
+
+  return (
+    <div className="max-w-2xl mx-auto px-3 py-4 pb-24">
+      {/* Top action bar */}
+      <div className="flex items-center gap-2 mb-4">
+        <button onClick={() => navigate('/')} className="p-2 rounded-xl hover:bg-gray-100 text-gray-600 active:scale-95 transition-transform">
+          <ArrowLeft size={20} />
+        </button>
+        <span className="flex-1 font-bold text-gray-800 text-base">Challan #{bill.challanNo}</span>
+        <button onClick={() => navigate(`/edit/${bill.id}`)} className="p-2 rounded-xl bg-amber-50 text-amber-700 active:scale-95 transition-transform">
+          <Pencil size={18} />
+        </button>
+        <button onClick={() => setShowDelete(true)} className="p-2 rounded-xl bg-red-50 text-red-600 active:scale-95 transition-transform">
+          <Trash2 size={18} />
+        </button>
+      </div>
+
+      {/* Screen preview */}
+      <div ref={printRef} className="bg-white rounded-2xl shadow overflow-hidden mx-2">
+        {/* Header — white bg, black text, gray border */}
+        <div className="text-center py-3 border-b border-gray-200">
+          <div className="font-bold text-xl tracking-widest text-gray-900">ESTIMATE</div>
+        </div>
+
+        {/* Meta — name + challan no on same row, location + date on second row */}
+        <div className="px-6 pt-3 pb-2">
+          <div className="flex justify-between items-baseline border-b border-gray-200 pb-2">
+            <div>
+              <span className="text-xs text-gray-500">M/s </span>
+              <span className="font-bold text-sm text-gray-900 uppercase">{bill.customerName}</span>
+            </div>
+            <div className="text-right text-xs">
+              <span className="text-gray-500">Challan No : </span>
+              <span className="font-bold text-gray-900">{bill.challanNo}</span>
+            </div>
+          </div>
+          <div className="flex justify-between items-baseline pt-2">
+            <div>
+              <span className="text-gray-500 text-xs">Location: </span>
+              <span className="font-semibold text-gray-700 text-xs">{bill.location || '—'}</span>
+            </div>
+            <div className="text-right text-xs">
+              <span className="text-gray-500">Date : </span>
+              <span className="font-bold text-gray-900">{formattedDate}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Items table */}
+        <div className="px-4 pb-3 overflow-x-auto">
+          <table className="w-full text-xs border-collapse table-fixed" style={{ minWidth: 420 }}>
+            <colgroup>
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '30%' }} />
+              <col style={{ width: '20%' }} />
+              <col style={{ width: '10%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '20%' }} />
+            </colgroup>
+            <thead>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 px-1 py-1.5 text-center font-bold text-gray-700">Sr</th>
+                <th className="border border-gray-300 px-2 py-1.5 text-left font-bold text-gray-700">Product Name</th>
+                <th className="border border-gray-300 px-1 py-1.5 text-right font-bold text-gray-700">Qty</th>
+                <th className="border border-gray-300 px-1 py-1.5 text-center font-bold text-gray-700">Pcs</th>
+                <th className="border border-gray-300 px-1 py-1.5 text-right font-bold text-gray-700">Rate</th>
+                <th className="border border-gray-300 px-1 py-1.5 text-right font-bold text-gray-700">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {bill.items.map((item, i) => {
+                const total = item.qty * item.pcs * item.rate;
+                return (
+                  <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                    <td className="border border-gray-200 px-1 py-1.5 text-center text-gray-500">{i + 1}</td>
+                    <td className="border border-gray-200 px-2 py-1.5 text-gray-800 font-medium">{item.productName}</td>
+                    <td className="border border-gray-200 px-1 py-1.5 text-right text-gray-700">
+                      {item.qty.toLocaleString('en-IN')} <span className="text-gray-400">{item.unit}</span>
+                    </td>
+                    <td className="border border-gray-200 px-1 py-1.5 text-center text-gray-700">{item.pcs}</td>
+                    <td className="border border-gray-200 px-1 py-1.5 text-right text-gray-700">{item.rate.toLocaleString('en-IN')}</td>
+                    <td className="border border-gray-200 px-1 py-1.5 text-right font-semibold text-gray-800">
+                      {total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr className="bg-gray-100 font-bold text-gray-900">
+                <td colSpan={5} className="border border-gray-300 px-2 py-2 text-right text-xs uppercase tracking-wide">Grand Total</td>
+                <td className="border border-gray-300 px-1 py-2 text-right text-sm">
+                  {grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {/* Bottom block — two columns: info left, signature right */}
+        <div className="mx-5 mb-4 border border-gray-200 rounded bg-white flex">
+          {/* Left: Amount / Narration / Note */}
+          <div className="flex-1 px-3 py-2 space-y-1 text-xs">
+            <div>
+              <span className="font-semibold text-gray-500">Amount in Words : </span>
+              <span className="italic text-gray-900">{amountInWords(grandTotal)}</span>
+            </div>
+            <div>
+              <span className="font-semibold text-gray-500">Narration : </span>
+              <span className="text-gray-800">{bill.narration || 'OK'}</span>
+            </div>
+            {bill.note && (
+              <div>
+                <span className="font-semibold text-gray-500">Note : </span>
+                <span className="text-gray-800">{bill.note}</span>
+              </div>
+            )}
+          </div>
+          {/* Right: Receiver's Signature */}
+          <div className="w-36 flex flex-col items-center justify-center py-3 gap-1">
+            <div className="w-28 border-t border-gray-400"></div>
+            <span className="text-xs text-gray-500">Receiver's Signature</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom actions */}
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/90 backdrop-blur border-t border-gray-200 flex gap-3 max-w-2xl mx-auto">
+        <button onClick={() => navigate('/')} className="flex-1 py-3 rounded-xl border border-gray-200 text-gray-700 font-medium active:scale-95 transition-transform">
+          Back
+        </button>
+        <button
+          onClick={handleDownloadPDF}
+          disabled={downloading}
+          className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-blue-700 text-white font-semibold shadow active:scale-95 transition-transform disabled:opacity-60"
+        >
+          <Download size={18} />
+          {downloading ? 'Generating...' : 'Download PDF'}
+        </button>
+      </div>
+
+      {/* Delete modal */}
+      {showDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-end sm:items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+            <h3 className="font-bold text-lg text-gray-800 mb-2">Delete Challan?</h3>
+            <p className="text-gray-500 text-sm mb-5">Challan <strong>{bill.challanNo}</strong> will be permanently deleted.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setShowDelete(false)} className="flex-1 py-2.5 rounded-xl border border-gray-200 text-gray-700 font-medium">Cancel</button>
+              <button onClick={handleDelete} className="flex-1 py-2.5 rounded-xl bg-red-600 text-white font-medium active:scale-95 transition-transform">Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
