@@ -7,13 +7,14 @@ import { getBill, deleteBill } from '../utils/storage';
 import type { Bill } from '../types';
 
 // ── Color palette — text only is black, no dark backgrounds ──
-const C_BLACK  = [0,   0,   0  ] as const; // text
-const C_MID    = [100, 100, 100] as const; // labels / captions
-const C_BORDER = [180, 180, 180] as const; // all borders
-const C_HEAD   = [230, 230, 230] as const; // table header row bg
-const C_ALT    = [246, 246, 246] as const; // alternating row bg
-const C_BAND   = [238, 238, 238] as const; // amount-in-words / footer band bg
-const C_WHITE  = [255, 255, 255] as const;
+type RGB = [number, number, number];
+const C_BLACK  : RGB = [0,   0,   0  ];
+const C_MID    : RGB = [100, 100, 100];
+const C_BORDER : RGB = [180, 180, 180];
+const C_HEAD   : RGB = [230, 230, 230];
+const C_ALT    : RGB = [246, 246, 246];
+const C_BAND   : RGB = [238, 238, 238];
+const C_WHITE  : RGB = [255, 255, 255];
 
 // ── Amount in words (Indian numbering) ───────────────────────
 const ONES = ['', 'One','Two','Three','Four','Five','Six','Seven','Eight','Nine',
@@ -153,8 +154,8 @@ function buildPDF(bill: Bill): jsPDF {
     styles: { lineColor: C_BORDER, lineWidth: 0.2 },
     didParseCell: (data) => {
       if (data.section === 'foot' && data.column.index < 4) {
-        data.cell.styles.fillColor = C_ALT as unknown as [number, number, number];
-        data.cell.styles.textColor = C_MID as unknown as [number, number, number];
+        data.cell.styles.fillColor = C_ALT;
+        data.cell.styles.textColor = C_MID;
       }
     },
   });

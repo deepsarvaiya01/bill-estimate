@@ -91,7 +91,7 @@ export default function BillList() {
                 <span className="text-xs text-gray-400 mr-2">#{i + 1}</span>
                 <span className="font-bold text-blue-700 text-sm">{bill.challanNo}</span>
               </div>
-              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{bill.copyType}</span>
+              <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">{bill.challanNo}</span>
             </div>
             <div className="font-semibold text-gray-800">{bill.customerName}</div>
             <div className="text-xs text-gray-400 mb-1">{bill.location}</div>

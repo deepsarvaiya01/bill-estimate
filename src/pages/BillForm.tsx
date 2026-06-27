@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef, KeyboardEvent } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import type { KeyboardEvent } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PlusCircle, Trash2, ChevronDown } from 'lucide-react';
+import { PlusCircle, Trash2 } from 'lucide-react';
 import { getBill, addBill, updateBill, generateId, generateChallanNo } from '../utils/storage';
 import type { Bill, BillItem } from '../types';
 
