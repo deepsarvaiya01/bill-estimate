@@ -12,7 +12,8 @@ function emptyItem(): BillItem {
 }
 
 function itemTotal(item: BillItem): number {
-  return item.qty * item.pcs * item.rate;
+  const vals = [item.qty, item.pcs, item.rate].filter(v => v !== 0);
+  return vals.length === 0 ? 0 : vals.reduce((a, v) => a * v, 1);
 }
 
 function emptyBill(): Omit<Bill, 'id' | 'createdAt' | 'updatedAt'> {
@@ -133,8 +134,8 @@ export default function BillForm() {
     navigate('/');
   }
 
-  const cellCls = 'border border-gray-200 focus:outline-none focus:bg-blue-50 focus:border-blue-400 transition-colors text-sm px-2 py-2 w-full bg-white';
-  const errCellCls = 'border border-red-300 bg-red-50';
+  const cellCls = 'focus:outline-none focus:bg-blue-50 transition-colors text-sm px-2 py-2 w-full bg-white';
+  const errCellCls = 'bg-red-50';
 
   return (
     <div className="max-w-2xl mx-auto px-3 py-4 pb-24 space-y-4">
@@ -145,13 +146,13 @@ export default function BillForm() {
         <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Challan Details</p>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Challan No.</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Challan No.</label>
             <div className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm bg-gray-50 text-blue-700 font-bold tracking-wide select-all">
               {form.challanNo}
             </div>
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Date *</label>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">Date *</label>
             <input
               type="date"
               className={`w-full border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 ${errors.date ? 'border-red-400' : 'border-gray-200'}`}
@@ -166,7 +167,7 @@ export default function BillForm() {
       <div className="bg-white rounded-2xl shadow p-4 space-y-3">
         <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide">Customer Info</p>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Customer Name (M/s) *</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Customer Name (M/s) *</label>
           <input
             className={`w-full border rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 ${errors.customerName ? 'border-red-400' : 'border-gray-200'}`}
             placeholder="Customer name"
@@ -176,7 +177,7 @@ export default function BillForm() {
           {errors.customerName && <p className="text-red-500 text-xs mt-1">{errors.customerName}</p>}
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Location</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Location</label>
           <input
             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
             placeholder="City / Area"
@@ -202,7 +203,7 @@ export default function BillForm() {
 
         {errors.items && <p className="text-red-500 text-xs px-4 py-1">{errors.items}</p>}
 
-        <table ref={tableRef} className="w-full border-collapse text-xs table-fixed">
+        <table ref={tableRef} className="w-full text-xs table-fixed border-collapse">
           <colgroup>
             <col style={{ width: '6%' }} />
             <col style={{ width: '27%' }} />
@@ -213,7 +214,7 @@ export default function BillForm() {
             <col style={{ width: '6%' }} />
           </colgroup>
           <thead>
-            <tr className="bg-gray-50 text-gray-500 uppercase tracking-wide">
+            <tr className="bg-gray-100 text-gray-600 font-bold uppercase tracking-wide text-[10px]">
               <th className="border border-gray-200 px-1 py-2 text-center">#</th>
               <th className="border border-gray-200 px-1 py-2 text-left">Product</th>
               <th className="border border-gray-200 px-1 py-2 text-center">Qty / Unit</th>
@@ -227,15 +228,15 @@ export default function BillForm() {
             {form.items.map((item, i) => (
               <tr key={item.id} className="group hover:bg-blue-50/40 transition-colors">
                 {/* Row number */}
-                <td className="border border-gray-200 text-center text-gray-400 select-none py-1">
+                <td className="border-l border-r border-gray-200 text-center text-gray-400 select-none py-2 px-1">
                   {i + 1}
                 </td>
 
                 {/* Product Name */}
-                <td className={`border p-0 ${errors[`item_${i}`] ? errCellCls : 'border-gray-200'}`}>
+                <td className={`border-r border-gray-200 p-0 ${errors[`item_${i}`] ? 'border-r-red-300' : ''}`}>
                   <input
                     data-col="name"
-                    className={`${cellCls} ${errors[`item_${i}`] ? 'bg-red-50' : ''}`}
+                    className={`${cellCls} ${errors[`item_${i}`] ? errCellCls : ''}`}
                     placeholder="Name"
                     value={item.productName}
                     onChange={(e) => setItem(item.id, 'productName', e.target.value)}
@@ -244,7 +245,7 @@ export default function BillForm() {
                 </td>
 
                 {/* Qty + Unit combined */}
-                <td className="border border-gray-200 p-0">
+                <td className="border-r border-gray-200 p-0">
                   <div className="flex">
                     <input
                       data-col="qty"
@@ -270,7 +271,7 @@ export default function BillForm() {
                 </td>
 
                 {/* Pcs */}
-                <td className="border border-gray-200 p-0">
+                <td className="border-r border-gray-200 p-0">
                   <input
                     data-col="pcs"
                     type="number"
@@ -285,7 +286,7 @@ export default function BillForm() {
                 </td>
 
                 {/* Rate */}
-                <td className="border border-gray-200 p-0">
+                <td className="border-r border-gray-200 p-0">
                   <input
                     data-col="rate"
                     type="number"
@@ -300,12 +301,12 @@ export default function BillForm() {
                 </td>
 
                 {/* Total (read-only) */}
-                <td className="border border-gray-200 px-1 py-1 text-right text-gray-700 font-medium bg-gray-50 select-none">
+                <td className="border-r border-gray-200 px-2 py-2 text-right text-gray-800 font-bold bg-gray-50 select-none">
                   {itemTotal(item).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
 
                 {/* Delete */}
-                <td className="border border-gray-200 text-center p-0.5">
+                <td className="border-r border-gray-200 text-center p-0.5">
                   <button
                     onClick={() => removeItem(item.id)}
                     disabled={form.items.length === 1}
@@ -318,15 +319,15 @@ export default function BillForm() {
             ))}
 
             {/* Grand total row */}
-            <tr className="bg-blue-700 text-white font-semibold">
-              <td colSpan={5} className="border border-blue-600 px-2 py-2 text-right text-xs uppercase tracking-wide">
+            <tr className="bg-gray-100 font-bold text-gray-900">
+              <td colSpan={5} className="border-t border-l border-r border-gray-200 px-2 py-2 text-right text-xs uppercase tracking-widest">
                 Grand Total
               </td>
-              <td className="border border-blue-600 px-1 py-2 text-right text-sm">
+              <td className="border-t border-r border-gray-200 px-1 py-2 text-right text-sm font-extrabold">
                 {form.items.reduce((sum, it) => sum + itemTotal(it), 0)
                   .toLocaleString('en-IN', { maximumFractionDigits: 2 })}
               </td>
-              <td className="border border-blue-600"></td>
+              <td className="border-t border-r border-gray-200"></td>
             </tr>
           </tbody>
         </table>
@@ -343,7 +344,7 @@ export default function BillForm() {
       {/* Note + Narration */}
       <div className="bg-white rounded-2xl shadow p-4 space-y-3">
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Narration</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Narration</label>
           <input
             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400"
             placeholder="e.g. OK, Payment received, Against order..."
@@ -352,7 +353,7 @@ export default function BillForm() {
           />
         </div>
         <div>
-          <label className="block text-xs text-gray-500 mb-1">Note (optional)</label>
+          <label className="block text-xs font-semibold text-gray-600 mb-1">Note (optional)</label>
           <textarea
             className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-400 resize-none"
             rows={2}

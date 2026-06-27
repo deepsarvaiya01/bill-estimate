@@ -60,6 +60,11 @@ function amountInWords(amount: number): string {
   return result + ' Only';
 }
 
+function itemTotal(item: Bill['items'][number]): number {
+  const vals = [item.qty, item.pcs, item.rate].filter(v => v !== 0);
+  return vals.length === 0 ? 0 : vals.reduce((a, v) => a * v, 1);
+}
+
 // ── PDF builder ───────────────────────────────────────────────
 function buildPDF(bill: Bill): jsPDF {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
@@ -71,7 +76,7 @@ function buildPDF(bill: Bill): jsPDF {
     ? new Date(bill.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '';
 
-  const grandTotal = bill.items.reduce((s, it) => s + it.qty * it.pcs * it.rate, 0);
+  const grandTotal = bill.items.reduce((s, it) => s + itemTotal(it), 0);
 
   // ── ESTIMATE header — white bg, black bold text, gray bottom border ──
   doc.setFillColor(...C_WHITE);
@@ -127,10 +132,10 @@ function buildPDF(bill: Bill): jsPDF {
   const rows = bill.items.map((it, i) => [
     String(i + 1),
     it.productName,
-    `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
+    it.qty === 0 ? '—' : `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
     String(it.pcs),
     it.rate.toLocaleString('en-IN'),
-    (it.qty * it.pcs * it.rate).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
+    itemTotal(it).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
   ]);
 
   autoTable(doc, {
@@ -139,9 +144,9 @@ function buildPDF(bill: Bill): jsPDF {
     head: [['Sr', 'Product Name', 'Qty / Unit', 'Pcs', 'Rate', 'Total']],
     body: rows,
     foot: [['', '', '', '', 'Grand Total', grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })]],
-    headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center' },
-    footStyles: { fillColor: C_BAND, textColor: C_BLACK, fontStyle: 'bold', fontSize: 9, halign: 'right' },
-    bodyStyles: { fontSize: 8, textColor: C_BLACK },
+    headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center', lineColor: C_BORDER, lineWidth: 0.2 },
+    footStyles: { fillColor: C_BAND, textColor: C_BLACK, fontStyle: 'bold', fontSize: 9, halign: 'right', lineColor: C_BORDER, lineWidth: 0.2 },
+    bodyStyles: { fontSize: 8, textColor: C_BLACK, lineWidth: 0, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
     alternateRowStyles: { fillColor: C_ALT },
     columnStyles: {
       0: { halign: 'center', cellWidth: 10 },
@@ -151,11 +156,24 @@ function buildPDF(bill: Bill): jsPDF {
       4: { halign: 'right', cellWidth: 22 },
       5: { halign: 'right', cellWidth: 28, fontStyle: 'bold' },
     },
-    styles: { lineColor: C_BORDER, lineWidth: 0.2 },
+    styles: { lineColor: C_BORDER, lineWidth: 0 },
     didParseCell: (data) => {
       if (data.section === 'foot' && data.column.index < 4) {
         data.cell.styles.fillColor = C_ALT;
         data.cell.styles.textColor = C_MID;
+      }
+    },
+    didDrawCell: (data) => {
+      if (data.section === 'body') {
+        doc.setDrawColor(...C_BORDER);
+        doc.setLineWidth(0.2);
+        const x = data.cell.x + data.cell.width;
+        const y = data.cell.y;
+        const h = data.cell.height;
+        doc.line(x, y, x, y + h);
+        if (data.column.index === 0) {
+          doc.line(data.cell.x, y, data.cell.x, y + h);
+        }
       }
     },
   });
@@ -258,7 +276,7 @@ export default function BillView() {
     ? new Date(bill.date).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' })
     : '';
 
-  const grandTotal = bill.items.reduce((s, it) => s + it.qty * it.pcs * it.rate, 0);
+  const grandTotal = bill.items.reduce((s, it) => s + itemTotal(it), 0);
 
   return (
     <div className="max-w-2xl mx-auto px-3 py-4 pb-24">
@@ -309,7 +327,7 @@ export default function BillView() {
 
         {/* Items table */}
         <div className="px-4 pb-3 overflow-x-auto">
-          <table className="w-full text-xs border-collapse table-fixed" style={{ minWidth: 420 }}>
+          <table className="w-full text-xs table-fixed border-collapse" style={{ minWidth: 420 }}>
             <colgroup>
               <col style={{ width: '6%' }} />
               <col style={{ width: '30%' }} />
@@ -329,26 +347,23 @@ export default function BillView() {
               </tr>
             </thead>
             <tbody>
-              {bill.items.map((item, i) => {
-                const total = item.qty * item.pcs * item.rate;
-                return (
-                  <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-                    <td className="border border-gray-200 px-1 py-1.5 text-center text-gray-500">{i + 1}</td>
-                    <td className="border border-gray-200 px-2 py-1.5 text-gray-800 font-medium">{item.productName}</td>
-                    <td className="border border-gray-200 px-1 py-1.5 text-right text-gray-700">
-                      {item.qty.toLocaleString('en-IN')} <span className="text-gray-400">{item.unit}</span>
-                    </td>
-                    <td className="border border-gray-200 px-1 py-1.5 text-center text-gray-700">{item.pcs}</td>
-                    <td className="border border-gray-200 px-1 py-1.5 text-right text-gray-700">{item.rate.toLocaleString('en-IN')}</td>
-                    <td className="border border-gray-200 px-1 py-1.5 text-right font-semibold text-gray-800">
-                      {total.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                    </td>
-                  </tr>
-                );
-              })}
+              {bill.items.map((item, i) => (
+                <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="border-l border-r border-gray-200 px-1 py-2 text-center text-gray-500">{i + 1}</td>
+                  <td className="border-r border-gray-200 px-2 py-2 text-gray-900 font-semibold">{item.productName}</td>
+                  <td className="border-r border-gray-200 px-1 py-2 text-right text-gray-700">
+                    {item.qty === 0 ? '—' : <>{item.qty.toLocaleString('en-IN')} <span className="text-gray-400">{item.unit}</span></>}
+                  </td>
+                  <td className="border-r border-gray-200 px-1 py-2 text-center text-gray-700">{item.pcs}</td>
+                  <td className="border-r border-gray-200 px-1 py-2 text-right text-gray-700">{item.rate.toLocaleString('en-IN')}</td>
+                  <td className="border-r border-gray-200 px-1 py-2 text-right font-bold text-gray-900">
+                    {itemTotal(item).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  </td>
+                </tr>
+              ))}
               <tr className="bg-gray-100 font-bold text-gray-900">
-                <td colSpan={5} className="border border-gray-300 px-2 py-2 text-right text-xs uppercase tracking-wide">Grand Total</td>
-                <td className="border border-gray-300 px-1 py-2 text-right text-sm">
+                <td colSpan={5} className="border-t border-l border-r border-gray-300 px-2 py-2 text-right text-xs uppercase tracking-widest">Grand Total</td>
+                <td className="border-t border-r border-gray-300 px-1 py-2 text-right text-sm font-extrabold">
                   {grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                 </td>
               </tr>
