@@ -146,7 +146,7 @@ function buildPDF(bill: Bill): jsPDF {
     foot: [['', '', '', '', 'Grand Total', grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })]],
     headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center', lineColor: C_BORDER, lineWidth: 0.2 },
     footStyles: { fillColor: C_BAND, textColor: C_BLACK, fontStyle: 'bold', fontSize: 9, halign: 'right', lineColor: C_BORDER, lineWidth: 0.2 },
-    bodyStyles: { fontSize: 8, textColor: C_BLACK, lineWidth: 0, cellPadding: { top: 2.5, bottom: 2.5, left: 2, right: 2 } },
+    bodyStyles: { fontSize: 8, textColor: C_BLACK, lineWidth: 0, cellPadding: { top: 1.2, bottom: 1.2, left: 2, right: 2 } },
     alternateRowStyles: { fillColor: C_ALT },
     columnStyles: {
       0: { halign: 'center', cellWidth: 10 },
