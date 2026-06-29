@@ -131,7 +131,7 @@ function buildPDF(bill: Bill): jsPDF {
   // ── Items table ───────────────────────────────────────────────
   const rows = bill.items.map((it, i) => [
     String(i + 1),
-    it.productName,
+    it.productName.toUpperCase(),
     String(it.pcs),
     it.qty === 0 ? '—' : `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
     it.rate.toLocaleString('en-IN'),
@@ -143,9 +143,7 @@ function buildPDF(bill: Bill): jsPDF {
     margin: { left: M + P, right: M + P },
     head: [['Sr', 'Product Name', 'Pcs', 'Qty / Unit', 'Rate', 'Total']],
     body: rows,
-    foot: [['', '', '', '', 'Grand Total', grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })]],
-    headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center', lineColor: C_BORDER, lineWidth: 0.2 },
-    footStyles: { fillColor: C_BAND, textColor: C_BLACK, fontStyle: 'bold', fontSize: 9, halign: 'right', lineColor: C_BORDER, lineWidth: 0.2 },
+    headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center', lineWidth: 0 },
     bodyStyles: { fontSize: 8, textColor: C_BLACK, lineWidth: 0, cellPadding: { top: 1.2, bottom: 1.2, left: 2, right: 2 } },
     alternateRowStyles: { fillColor: C_ALT },
     columnStyles: {
@@ -156,17 +154,21 @@ function buildPDF(bill: Bill): jsPDF {
       4: { halign: 'right', cellWidth: 22 },
       5: { halign: 'right', cellWidth: 28, fontStyle: 'bold' },
     },
-    styles: { lineColor: C_BORDER, lineWidth: 0 },
-    didParseCell: (data) => {
-      if (data.section === 'foot' && data.column.index < 4) {
-        data.cell.styles.fillColor = C_ALT;
-        data.cell.styles.textColor = C_MID;
-      }
-    },
+    styles: { lineWidth: 0 },
     didDrawCell: (data) => {
+      doc.setDrawColor(...C_BORDER);
+      doc.setLineWidth(0.2);
+      if (data.section === 'head') {
+        // draw only the bottom border of the header row
+        const isLastCol = data.column.index === data.table.columns.length - 1;
+        if (isLastCol) {
+          doc.line(data.cell.x + data.cell.width, data.cell.y, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+        }
+        doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+        doc.line(data.cell.x, data.cell.y, data.cell.x + data.cell.width, data.cell.y);
+        doc.line(data.cell.x, data.cell.y, data.cell.x, data.cell.y + data.cell.height);
+      }
       if (data.section === 'body') {
-        doc.setDrawColor(...C_BORDER);
-        doc.setLineWidth(0.2);
         const x = data.cell.x + data.cell.width;
         const y = data.cell.y;
         const h = data.cell.height;
@@ -174,38 +176,62 @@ function buildPDF(bill: Bill): jsPDF {
         if (data.column.index === 0) {
           doc.line(data.cell.x, y, data.cell.x, y + h);
         }
+        // bottom line on the last row
+        const isLastRow = data.row.index === data.table.body.length - 1;
+        if (isLastRow) {
+          doc.line(data.cell.x, y + h, data.cell.x + data.cell.width, y + h);
+        }
       }
     },
   });
 
-  const blockTop = (doc as any).lastAutoTable.finalY + 4;
+  // ── Bottom section: pinned to page bottom ─────────────────────
+  const pageH = doc.internal.pageSize.getHeight();
+  const bottomY = pageH - M;
 
-  // Left column: Amount in Words, Narration, Note (small gaps, no dividers)
-  // Right column: Receiver's Signature
+  const lineRowH = 8;
+  const lineGap = 5.5;
   const leftW = cW * 0.62;
   const rightX = M + leftW + 2;
   const rightW = cW - leftW - 2;
-  const lineGap = 5.5; // gap between rows
 
   const infoRows: { label: string; value: string; italic?: boolean }[] = [
     { label: 'Amount in Words :', value: amountInWords(grandTotal), italic: true },
     { label: 'Narration :', value: bill.narration || 'OK' },
     ...(bill.note ? [{ label: 'Note :', value: bill.note }] : []),
   ];
+  const sigBlockH = Math.max(infoRows.length * lineGap + 6, 20);
 
-  // Calculate block height from content
-  const blockH = Math.max(infoRows.length * lineGap + 8, 22);
+  const grandTotalTop = bottomY - lineRowH;
+  const sigBlockTop   = grandTotalTop - sigBlockH;
+  const subTotalTop   = sigBlockTop - lineRowH;
 
-  // ── Outer block (white bg, gray border) ──────────────────────
-  doc.setFillColor(...C_WHITE);
-  doc.rect(M, blockTop, cW, blockH, 'F');
+  // ── Sub Total row — full gray bg, label+price in right 30% ───
+  const boxW   = cW * 0.3;
+  const boxX   = M + cW * 0.7;
+  const stMidY = subTotalTop + lineRowH / 2 + 1.5;
+  doc.setFillColor(...C_ALT);
+  doc.rect(M, subTotalTop, cW, lineRowH, 'F');
   doc.setDrawColor(...C_BORDER);
   doc.setLineWidth(0.3);
-  doc.rect(M, blockTop, cW, blockH, 'S');
+  doc.rect(M, subTotalTop, cW, lineRowH, 'S');
+  doc.rect(boxX, subTotalTop, boxW, lineRowH, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...C_MID);
+  doc.text('Sub Total', boxX + 2, stMidY);
+  doc.setTextColor(...C_BLACK);
+  doc.text(grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 }), boxX + boxW - 2, stMidY, { align: 'right' });
 
-  // ── Left: info rows ───────────────────────────────────────────
+  // ── Signature + Info block ────────────────────────────────────
+  doc.setFillColor(...C_WHITE);
+  doc.rect(M, sigBlockTop, cW, sigBlockH, 'F');
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.3);
+  doc.rect(M, sigBlockTop, cW, sigBlockH, 'S');
+
   doc.setFontSize(8);
-  let ly = blockTop + 6;
+  let ly = sigBlockTop + 6;
   infoRows.forEach((row) => {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...C_MID);
@@ -217,8 +243,7 @@ function buildPDF(bill: Bill): jsPDF {
     ly += lineGap;
   });
 
-  // ── Right: Receiver's Signature centred vertically ────────────
-  const sigMidY = blockTop + blockH / 2;
+  const sigMidY  = sigBlockTop + sigBlockH / 2;
   const sigLineY = sigMidY + 2;
   doc.setDrawColor(...C_MID);
   doc.setLineWidth(0.3);
@@ -227,11 +252,25 @@ function buildPDF(bill: Bill): jsPDF {
   doc.setTextColor(...C_MID);
   doc.text("Receiver's Signature", rightX + rightW / 2, sigLineY + 4, { align: 'center' });
 
-  // ── Outer border — wraps only actual content ──────────────────
-  const contentBottom = blockTop + blockH + 2;
+  // ── Grand Total row — full gray bg, label+price in right 30% ─
+  const gtMidY = grandTotalTop + lineRowH / 2 + 1.5;
+  doc.setFillColor(...C_BAND);
+  doc.rect(M, grandTotalTop, cW, lineRowH, 'F');
+  doc.setDrawColor(...C_BORDER);
+  doc.setLineWidth(0.3);
+  doc.rect(M, grandTotalTop, cW, lineRowH, 'S');
+  doc.rect(boxX, grandTotalTop, boxW, lineRowH, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...C_MID);
+  doc.text('Grand Total', boxX + 2, gtMidY);
+  doc.setTextColor(...C_BLACK);
+  doc.text(grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 }), boxX + boxW - 2, gtMidY, { align: 'right' });
+
+  // ── Outer border — full page height ──────────────────────────
   doc.setDrawColor(...C_BORDER);
   doc.setLineWidth(0.5);
-  doc.rect(M, 8, cW, contentBottom - 8, 'S');
+  doc.rect(M, 8, cW, bottomY - 8, 'S');
 
   return doc;
 }

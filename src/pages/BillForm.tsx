@@ -12,8 +12,8 @@ function emptyItem(): BillItem {
 }
 
 function itemTotal(item: BillItem): number {
-  const vals = [item.qty, item.pcs, item.rate].filter(v => v !== 0);
-  return vals.length === 0 ? 0 : vals.reduce((a, v) => a * v, 1);
+  if (item.qty === 0 && item.rate === 0) return 0;
+  return (item.qty || 1) * item.rate;
 }
 
 function emptyBill(): Omit<Bill, 'id' | 'createdAt' | 'updatedAt'> {
