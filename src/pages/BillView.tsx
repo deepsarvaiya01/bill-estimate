@@ -61,8 +61,8 @@ function amountInWords(amount: number): string {
 }
 
 function itemTotal(item: Bill['items'][number]): number {
-  const vals = [item.qty, item.pcs, item.rate].filter(v => v !== 0);
-  return vals.length === 0 ? 0 : vals.reduce((a, v) => a * v, 1);
+  if (item.qty === 0 && item.rate === 0) return 0;
+  return (item.qty || 1) * item.rate;
 }
 
 // ── PDF builder ───────────────────────────────────────────────
@@ -132,8 +132,8 @@ function buildPDF(bill: Bill): jsPDF {
   const rows = bill.items.map((it, i) => [
     String(i + 1),
     it.productName,
-    it.qty === 0 ? '—' : `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
     String(it.pcs),
+    it.qty === 0 ? '—' : `${it.qty.toLocaleString('en-IN')} ${it.unit}`,
     it.rate.toLocaleString('en-IN'),
     itemTotal(it).toLocaleString('en-IN', { maximumFractionDigits: 2 }),
   ]);
@@ -141,7 +141,7 @@ function buildPDF(bill: Bill): jsPDF {
   autoTable(doc, {
     startY: y,
     margin: { left: M + P, right: M + P },
-    head: [['Sr', 'Product Name', 'Qty / Unit', 'Pcs', 'Rate', 'Total']],
+    head: [['Sr', 'Product Name', 'Pcs', 'Qty / Unit', 'Rate', 'Total']],
     body: rows,
     foot: [['', '', '', '', 'Grand Total', grandTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })]],
     headStyles: { fillColor: C_HEAD, textColor: C_BLACK, fontStyle: 'bold', fontSize: 8, halign: 'center', lineColor: C_BORDER, lineWidth: 0.2 },
@@ -151,8 +151,8 @@ function buildPDF(bill: Bill): jsPDF {
     columnStyles: {
       0: { halign: 'center', cellWidth: 10 },
       1: { halign: 'left' },
-      2: { halign: 'right', cellWidth: 32 },
-      3: { halign: 'center', cellWidth: 14 },
+      2: { halign: 'center', cellWidth: 14 },
+      3: { halign: 'right', cellWidth: 32 },
       4: { halign: 'right', cellWidth: 22 },
       5: { halign: 'right', cellWidth: 28, fontStyle: 'bold' },
     },
